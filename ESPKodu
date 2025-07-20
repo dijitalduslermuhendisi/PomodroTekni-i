@@ -1,0 +1,127 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define EKRAN_GENISLIK 128
+#define EKRAN_YUKSEKLIK 32
+#define OLED_ADRES 0x3C
+
+Adafruit_SSD1306 ekran(EKRAN_GENISLIK, EKRAN_YUKSEKLIK, &Wire, -1);
+
+#define BUTON_PINI D3
+#define BUZZER_PINI D4
+#define LED_PINI D5
+
+enum Mod { CALISMA, MOLALAR };
+Mod mod = CALISMA;
+
+const unsigned long CALISMA_SURESI = 25UL * 60UL * 1000UL;
+const unsigned long MOLA_SURESI = 5UL * 60UL * 1000UL;
+
+unsigned long sure = CALISMA_SURESI;
+unsigned long baslangicZamani = 0, gecenSure = 0;
+bool calisiyor = false, sonButonDurumu = HIGH;
+unsigned long sonDebounce = 0;
+const unsigned long debounceGecikme = 50;
+
+void bipLedYak(int tekrar, int gecikme) {
+  for (int i = 0; i < tekrar; i++) {
+    digitalWrite(BUZZER_PINI, HIGH);
+    digitalWrite(LED_PINI, HIGH);
+    delay(gecikme);
+    digitalWrite(BUZZER_PINI, LOW);
+    digitalWrite(LED_PINI, LOW);
+    delay(gecikme);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUTON_PINI, INPUT_PULLUP);
+  pinMode(BUZZER_PINI, OUTPUT);
+  pinMode(LED_PINI, OUTPUT);
+  Wire.begin(D2, D1);
+
+  if (!ekran.begin(SSD1306_SWITCHCAPVCC, OLED_ADRES)) while (true);
+
+  ekran.clearDisplay();
+  ekran.setTextColor(SSD1306_WHITE);
+  ekran.setTextSize(1);
+  ekran.setCursor((EKRAN_GENISLIK - 90) / 2, 0);
+  ekran.print("POMODORO ZAMANI");
+  ekran.setCursor((EKRAN_GENISLIK - 108) / 2, 16);
+  ekran.print("Baslamak icin buton");
+  ekran.display();
+
+  bipLedYak(2, 80);
+}
+
+void loop() {
+  int okuma = digitalRead(BUTON_PINI);
+  if (okuma != sonButonDurumu) sonDebounce = millis();
+
+  if ((millis() - sonDebounce) > debounceGecikme) {
+    static bool basildi = false;
+    if (okuma == LOW && !basildi) {
+      basildi = true;
+      calisiyor = !calisiyor;
+      if (calisiyor) {
+        if (gecenSure == 0) {
+          mod = CALISMA;
+          sure = CALISMA_SURESI;
+          baslangicZamani = millis();
+        } else {
+          baslangicZamani = millis() - gecenSure;
+        }
+      } else {
+        gecenSure = millis() - baslangicZamani;
+      }
+      bipLedYak(1, 60);
+    }
+    if (okuma == HIGH) basildi = false;
+  }
+  sonButonDurumu = okuma;
+
+  if (!calisiyor && gecenSure == 0) return;
+
+  if (calisiyor) {
+    gecenSure = millis() - baslangicZamani;
+    if (gecenSure >= sure) {
+      bipLedYak(3, 200);
+      mod = (mod == CALISMA) ? MOLALAR : CALISMA;
+      sure = (mod == CALISMA) ? CALISMA_SURESI : MOLA_SURESI;
+      baslangicZamani = millis();
+      gecenSure = 0;
+    }
+  }
+
+  unsigned long kalan = (gecenSure >= sure) ? 0 : (sure - gecenSure);
+  int dakika = kalan / 60000;
+  int saniye = (kalan % 60000) / 1000;
+  int salise = (kalan % 1000) / 100;
+
+  ekran.clearDisplay();
+  ekran.setTextSize(1);
+  ekran.setCursor((EKRAN_GENISLIK - 90) / 2, 0);
+  ekran.print("POMODORO ZAMANI");
+
+  ekran.setTextSize(2);
+  char yazi[10];
+  sprintf(yazi, "%02d:%02d.%1d", dakika, saniye, salise);
+  int16_t x1, y1;
+  uint16_t w, h;
+  ekran.getTextBounds(yazi, 0, 0, &x1, &y1, &w, &h);
+  int x = (EKRAN_GENISLIK - w - 14) / 2, y = 12;
+  ekran.setCursor(x, y);
+  ekran.print(yazi);
+
+  int ikonX = x + w + 4, ikonY = y + 2;
+  if (calisiyor)
+    ekran.fillTriangle(ikonX, ikonY, ikonX, ikonY + 10, ikonX + 6, ikonY + 5, SSD1306_WHITE);
+  else {
+    ekran.fillRect(ikonX, ikonY, 2, 10, SSD1306_WHITE);
+    ekran.fillRect(ikonX + 4, ikonY, 2, 10, SSD1306_WHITE);
+  }
+
+  ekran.display();
+}
